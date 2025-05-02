@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 import aiohttp
 import os
-from dotenv import load_dotenV
+from dotenv import load_dotenv
 
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -61,4 +61,3 @@ async def on_message(message):
     await bot.process_commands(message)
 
 bot.run(DISCORD_TOKEN)
-
