@@ -3,8 +3,9 @@ from discord.ext import commands
 import os
 from dotenv import load_dotenv
 import asyncio
+import aiohttp
+from aiohttp import web
 import threading
-import time
 
 # Load environment variables
 load_dotenv()
@@ -43,7 +44,6 @@ async def post_to_mfl_board(author: str, body: str):
         "BODY": formatted_message
     }
 
-    import aiohttp
     async with aiohttp.ClientSession() as session:
         async with session.post(post_url, data=payload) as response:
             if response.status == 200:
@@ -53,12 +53,27 @@ async def post_to_mfl_board(author: str, body: str):
                 print(f"❌ Failed to post message. Status code: {response.status}")
                 return False
 
-# Run the bot in a separate thread
-def start_bot():
-    bot.run(DISCORD_TOKEN)
+# ---- START WEB SERVER ----
+async def handle_status(request):
+    return web.Response(text="✅ Bot is alive")
 
-threading.Thread(target=start_bot, daemon=True).start()
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_status)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, port=3000)
+    await site.start()
+    print("🌐 Web server running on port 3000")
 
-# Keep the main thread alive so Railway doesn't shut down the container
-while True:
-    time.sleep(3600)
+def start_async_web_server():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(start_web_server())
+    loop.run_forever()
+
+# Start web server in background thread
+threading.Thread(target=start_async_web_server, daemon=True).start()
+
+# ---- RUN DISCORD BOT ----
+bot.run(DISCORD_TOKEN)
