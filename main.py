@@ -2,7 +2,9 @@ import discord
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
-import asyncio  # ← Needed for the idle loop
+import asyncio
+import threading
+import time
 
 # Load environment variables
 load_dotenv()
@@ -20,12 +22,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     print(f"✅ Bot is ready: {bot.user} (ID: {bot.user.id})")
-    # Keep-alive dummy task to prevent Railway from stopping container
-    bot.loop.create_task(idle_loop())
-
-async def idle_loop():
-    while True:
-        await asyncio.sleep(3600)  # Sleep for 1 hour at a time
 
 @bot.command()
 async def ping(ctx):
@@ -57,14 +53,12 @@ async def post_to_mfl_board(author: str, body: str):
                 print(f"❌ Failed to post message. Status code: {response.status}")
                 return False
 
-# Run the bot
-import time
+# Run the bot in a separate thread
+def start_bot():
+    bot.run(DISCORD_TOKEN)
 
-# Run the bot in its own thread (non-blocking)
-import threading
-threading.Thread(target=lambda: bot.run(DISCORD_TOKEN), daemon=True).start()
+threading.Thread(target=start_bot, daemon=True).start()
 
-# Dummy loop to keep the main thread alive
+# Keep the main thread alive so Railway doesn't shut down the container
 while True:
     time.sleep(3600)
-
