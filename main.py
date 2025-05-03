@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
+import asyncio  # ← Needed for the idle loop
 
 # Load environment variables
 load_dotenv()
@@ -19,6 +20,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     print(f"✅ Bot is ready: {bot.user} (ID: {bot.user.id})")
+    # Keep-alive dummy task to prevent Railway from stopping container
+    bot.loop.create_task(idle_loop())
+
+async def idle_loop():
+    while True:
+        await asyncio.sleep(3600)  # Sleep for 1 hour at a time
 
 @bot.command()
 async def ping(ctx):
