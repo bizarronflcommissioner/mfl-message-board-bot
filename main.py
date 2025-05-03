@@ -7,7 +7,7 @@ import aiohttp
 from aiohttp import web
 import threading
 
-# Load environment variables
+# Load env vars
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LEAGUE_ID = os.getenv("LEAGUE_ID")
@@ -15,8 +15,12 @@ MESSAGE_BOARD_ID = os.getenv("MESSAGE_BOARD_ID")
 SEASON_YEAR = os.getenv("SEASON_YEAR", "2025")
 DISCORD_CLAIMS_CHANNEL = int(os.getenv("DISCORD_CLAIMS_CHANNEL"))
 
-# Bot setup
+# Discord bot setup
 intents = discord.Intents.default()
+intents.message_content = True
+intents.guilds = True
+intents.messages = True
+intents.guild_messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -28,6 +32,7 @@ async def on_ready():
 async def ping(ctx):
     await ctx.send("🏓 Pong!")
 
+# MFL message board post
 async def post_to_mfl_board(author: str, body: str):
     if not LEAGUE_ID or not MESSAGE_BOARD_ID:
         print("❌ MFL credentials missing.")
@@ -53,7 +58,32 @@ async def post_to_mfl_board(author: str, body: str):
                 print(f"❌ Failed to post message. Status code: {response.status}")
                 return False
 
-# ---- START WEB SERVER ----
+# Forum monitor
+@bot.event
+async def on_thread_create(thread):
+    if thread.parent_id != DISCORD_CLAIMS_CHANNEL:
+        return
+
+    print(f"🧵 New thread created: {thread.name} in forum {thread.parent_id}")
+    await asyncio.sleep(2)  # wait for starter msg to be ready
+
+    try:
+        starter_messages = [m async for m in thread.history(limit=1, oldest_first=True)]
+        if not starter_messages:
+            print("⚠️ No starter message found.")
+            return
+
+        starter_msg = starter_messages[0]
+        author = starter_msg.author.display_name
+        body = starter_msg.content
+
+        print(f"📨 Posting to MFL from {author}: {body[:60]}...")
+        await post_to_mfl_board(author, body)
+
+    except Exception as e:
+        print(f"❌ Error processing thread: {e}")
+
+# Web server (keep-alive)
 async def handle_status(request):
     return web.Response(text="✅ Bot is alive")
 
@@ -72,8 +102,8 @@ def start_async_web_server():
     loop.run_until_complete(start_web_server())
     loop.run_forever()
 
-# Start web server in background thread
+# Launch web server in background
 threading.Thread(target=start_async_web_server, daemon=True).start()
 
-# ---- RUN DISCORD BOT ----
+# Run the Discord bot
 bot.run(DISCORD_TOKEN)
