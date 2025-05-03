@@ -1,4 +1,4 @@
-import discord
+import discorD
 from discord.ext import commands
 import os
 from dotenv import load_dotenv
