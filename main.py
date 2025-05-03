@@ -34,13 +34,13 @@ async def get_mfl_session_cookie():
     async with aiohttp.ClientSession() as session:
         async with session.post(login_url, data=payload) as response:
             text = await response.text()
-            match = re.search(r'cookie_name="(.*?)" cookie_value="(.*?)"', text)
+            match = re.search(r'<status\s+MFL_USER_ID="([^"]+)"', text)
             if match:
-                cookie_name, cookie_value = match.groups()
-                print(f"[AUTH] Logged in to MFL. Cookie: {cookie_name}={cookie_value}")
-                return {cookie_name: cookie_value}
+                cookie_value = match.group(1)
+                print(f"[AUTH] Logged in to MFL. Cookie: MFL_USER_ID={cookie_value}")
+                return {"MFL_USER_ID": cookie_value}
             else:
-                print("[AUTH ERROR] Could not extract cookie from login response.")
+                print("[AUTH ERROR] Could not extract MFL_USER_ID from login response.")
                 print(f"[AUTH DEBUG] Response text:\n{text}")
                 return None
 
