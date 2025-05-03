@@ -60,43 +60,35 @@ async def post_to_mfl_board(author: str, body: str):
 # Forum monitor with logging & reactions
 @bot.event
 async def on_thread_create(thread):
+    print(f"[EVENT] on_thread_create fired for thread: {thread.name} ({thread.id})")
+
+    if str(thread.parent_id) != str(DISCORD_CLAIMS_CHANNEL):
+        print(f"[SKIP] Thread {thread.name} is in channel {thread.parent_id}, not {DISCORD_CLAIMS_CHANNEL}")
+        return
+
+    await asyncio.sleep(2)  # allow time for Discord to populate the starter message
+
     try:
-        print(f"🧵 Detected new thread: {thread.name} (ID: {thread.id}) in channel {thread.parent_id}")
-
-        if thread.parent_id != DISCORD_CLAIMS_CHANNEL:
-            print(f"⏭️ Thread not in target forum ({DISCORD_CLAIMS_CHANNEL}), skipping.")
+        # Debug: show thread history
+        messages = [m async for m in thread.history(limit=1, oldest_first=True)]
+        if not messages:
+            print(f"[ERROR] No starter message found for thread {thread.name}")
             return
 
-        await asyncio.sleep(2)  # Wait to ensure starter message is ready
+        msg = messages[0]
+        print(f"[MESSAGE] Author: {msg.author.display_name}, Content: {msg.content[:60]}")
 
-        # Fetch the first (starter) message
-        starter_messages = [m async for m in thread.history(limit=1, oldest_first=True)]
-        if not starter_messages:
-            print(f"⚠️ No messages found in thread {thread.name} (ID: {thread.id})")
-            return
-
-        starter_msg = starter_messages[0]
-        author = starter_msg.author.display_name
-        body = starter_msg.content
-
-        print(f"📬 Preparing to post claim from {author}: {body[:60]}...")
-
-        # Post to MFL message board
-        success = await post_to_mfl_board(author, body)
-
+        success = await post_to_mfl_board(msg.author.display_name, msg.content)
         if success:
-            print(f"✅ Posted claim to MFL from {author}.")
-            try:
-                await thread.send(f"✅ Claim posted to MFL message board.")
-                await starter_msg.add_reaction("📬")
-            except Exception as e:
-                print(f"⚠️ Unable to react or reply in thread: {e}")
+            print("[SUCCESS] Posted to MFL message board")
+            await thread.send("✅ Claim posted to MFL.")
+            await msg.add_reaction("📬")
         else:
-            print(f"❌ Failed to post message to MFL board.")
-            await thread.send("❌ There was an issue posting your claim to MFL.")
+            print("[FAIL] MFL post failed")
+            await thread.send("❌ Could not post to MFL.")
 
     except Exception as e:
-        print(f"❌ Error in on_thread_create: {e}")
+        print(f"[EXCEPTION] {e}")
 
 # Web server (keep-alive)
 async def handle_status(request):
