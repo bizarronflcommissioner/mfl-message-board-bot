@@ -58,4 +58,13 @@ async def post_to_mfl_board(author: str, body: str):
                 return False
 
 # Run the bot
-bot.run(DISCORD_TOKEN)
+import time
+
+# Run the bot in its own thread (non-blocking)
+import threading
+threading.Thread(target=lambda: bot.run(DISCORD_TOKEN), daemon=True).start()
+
+# Dummy loop to keep the main thread alive
+while True:
+    time.sleep(3600)
+
