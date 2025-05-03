@@ -1,13 +1,12 @@
 import discord
 from discord.ext import commands
-import os
-from dotenv import load_dotenv
-import asyncio
 import aiohttp
-from aiohttp import web
-import threading
+import os
+import re
+import asyncio
+from dotenv import load_dotenv
 
-# Load env vars
+# Load env variables
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 LEAGUE_ID = os.getenv("LEAGUE_ID")
@@ -15,26 +14,41 @@ MESSAGE_BOARD_ID = os.getenv("MESSAGE_BOARD_ID")
 SEASON_YEAR = os.getenv("SEASON_YEAR", "2025")
 DISCORD_CLAIMS_CHANNEL = int(os.getenv("DISCORD_CLAIMS_CHANNEL"))
 
-# Discord bot setup
+# MFL login credentials
+MFL_USERNAME = os.getenv("MFL_USERNAME")
+MFL_PASSWORD = os.getenv("MFL_PASSWORD")
+
 intents = discord.Intents.default()
 intents.message_content = True
-intents.guilds = True
-intents.messages = True
-intents.guild_messages = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-@bot.event
-async def on_ready():
-    print(f"✅ Bot is ready: {bot.user} (ID: {bot.user.id})")
+# MFL login to get session cookie
+async def get_mfl_session_cookie():
+    login_url = f"https://api.myfantasyleague.com/{SEASON_YEAR}/login"
+    payload = {
+        "USERNAME": MFL_USERNAME,
+        "PASSWORD": MFL_PASSWORD,
+        "XML": 1
+    }
 
-@bot.command()
-async def ping(ctx):
-    await ctx.send("🏓 Pong!")
+    async with aiohttp.ClientSession() as session:
+        async with session.post(login_url, data=payload) as response:
+            text = await response.text()
+            match = re.search(r'cookie_name="(.*?)" cookie_value="(.*?)"', text)
+            if match:
+                cookie_name, cookie_value = match.groups()
+                print(f"[AUTH] Logged in to MFL. Cookie: {cookie_name}={cookie_value}")
+                return {cookie_name: cookie_value}
+            else:
+                print("[AUTH ERROR] Could not extract cookie from login response.")
+                print(f"[AUTH DEBUG] Response text:\n{text}")
+                return None
 
-# MFL message board post
+# Post message to MFL board
 async def post_to_mfl_board(author: str, body: str):
-    if not LEAGUE_ID or not MESSAGE_BOARD_ID:
-        print("❌ MFL credentials missing.")
+    session_cookie = await get_mfl_session_cookie()
+    if not session_cookie:
+        print("❌ Login to MFL failed. Cannot post.")
         return False
 
     subject = f"Taxi Squad Claim - {author}"
@@ -48,69 +62,76 @@ async def post_to_mfl_board(author: str, body: str):
         "BODY": formatted_message
     }
 
-    async with aiohttp.ClientSession() as session:
-        async with session.post(post_url, data=payload) as response:
-            if response.status == 200:
-                print("✅ Message posted to MFL board.")
-                return True
-            else:
-                print(f"❌ Failed to post message. Status code: {response.status}")
-                return False
+    print(f"[MFL POST] POST to {post_url} with payload: {payload}")
 
-# Forum monitor with logging & reactions
+    try:
+        async with aiohttp.ClientSession(cookies=session_cookie) as session:
+            async with session.post(post_url, data=payload) as response:
+                text = await response.text()
+                print(f"[MFL RESPONSE] Status: {response.status}")
+                print(f"[MFL RESPONSE] Body: {text}")
+
+                if response.status == 200 and "error" not in text.lower():
+                    print("✅ Message posted to MFL board.")
+                    return True
+                else:
+                    print("❌ MFL post rejected.")
+                    return False
+    except Exception as e:
+        print(f"[EXCEPTION] {e}")
+        return False
+
+# Bot ready
+@bot.event
+async def on_ready():
+    print(f"✅ Bot is ready: {bot.user} (ID: {bot.user.id})")
+
+# Ping command for test
+@bot.command()
+async def ping(ctx):
+    await ctx.send("🏓 Pong!")
+
+# Diagnose forum channel detection
+@bot.command()
+async def diagnose(ctx):
+    guild = ctx.guild
+    forum_channels = [ch for ch in guild.channels if isinstance(ch, discord.ForumChannel)]
+    await ctx.send(f"✅ Found {len(forum_channels)} forum channels. Check Railway logs.")
+    print(f"[DIAGNOSE] DISCORD_CLAIMS_CHANNEL: {DISCORD_CLAIMS_CHANNEL}")
+    for ch in forum_channels:
+        print(f"- {ch.name} (ID: {ch.id})")
+
+# Thread event listener
 @bot.event
 async def on_thread_create(thread):
     print(f"[EVENT] on_thread_create fired for thread: {thread.name} ({thread.id})")
 
     if str(thread.parent_id) != str(DISCORD_CLAIMS_CHANNEL):
-        print(f"[SKIP] Thread {thread.name} is in channel {thread.parent_id}, not {DISCORD_CLAIMS_CHANNEL}")
+        print(f"[SKIP] Thread is not in claims forum: {thread.parent_id}")
         return
 
-    await asyncio.sleep(2)  # allow time for Discord to populate the starter message
+    await asyncio.sleep(2)  # Give Discord time to populate starter message
 
     try:
-        # Debug: show thread history
         messages = [m async for m in thread.history(limit=1, oldest_first=True)]
         if not messages:
-            print(f"[ERROR] No starter message found for thread {thread.name}")
+            print("[ERROR] No messages in thread.")
             return
 
         msg = messages[0]
-        print(f"[MESSAGE] Author: {msg.author.display_name}, Content: {msg.content[:60]}")
+        print(f"[MESSAGE] Author: {msg.author.display_name}, Content: {msg.content[:100]}")
 
         success = await post_to_mfl_board(msg.author.display_name, msg.content)
         if success:
-            print("[SUCCESS] Posted to MFL message board")
+            print("[SUCCESS] Claim posted to MFL.")
             await thread.send("✅ Claim posted to MFL.")
             await msg.add_reaction("📬")
         else:
-            print("[FAIL] MFL post failed")
+            print("[FAIL] MFL post failed.")
             await thread.send("❌ Could not post to MFL.")
 
     except Exception as e:
-        print(f"[EXCEPTION] {e}")
+        print(f"[EXCEPTION] Error in thread handler: {e}")
 
-# Web server (keep-alive)
-async def handle_status(request):
-    return web.Response(text="✅ Bot is alive")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle_status)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, port=3000)
-    await site.start()
-    print("🌐 Web server running on port 3000")
-
-def start_async_web_server():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(start_web_server())
-    loop.run_forever()
-
-# Launch web server in background
-threading.Thread(target=start_async_web_server, daemon=True).start()
-
-# Run the Discord bot
+# Start bot
 bot.run(DISCORD_TOKEN)
